@@ -1,36 +1,88 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ResumeTailor AI
+
+AI-powered resume tailoring tool. Users paste a job description + their resume, pay $4, and get an AI-rewritten resume that matches the job perfectly.
+
+## Tech Stack
+
+- **Next.js** (App Router) — full-stack framework
+- **Tailwind CSS** — styling
+- **OpenAI GPT-4o** — AI resume generation
+- **Stripe** — payment processing
+- **TypeScript** — type safety
 
 ## Getting Started
 
-First, run the development server:
+### 1. Install dependencies
+
+```bash
+npm install
+```
+
+### 2. Set up environment variables
+
+Copy `.env.example` to `.env.local` and fill in your API keys:
+
+```bash
+cp .env.example .env.local
+```
+
+You need:
+
+- **OpenAI API key** — get one at https://platform.openai.com/api-keys
+- **Stripe secret key** — get one at https://dashboard.stripe.com/apikeys
+- **Stripe webhook secret** — see step 4
+
+### 3. Run the development server
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 4. Set up Stripe webhooks (for local dev)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Install the Stripe CLI: https://stripe.com/docs/stripe-cli
 
-## Learn More
+```bash
+stripe listen --forward-to localhost:3000/api/webhook
+```
 
-To learn more about Next.js, take a look at the following resources:
+Copy the webhook signing secret it prints and add it to `.env.local` as `STRIPE_WEBHOOK_SECRET`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### 5. Test a payment
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Use Stripe test card: `4242 4242 4242 4242` with any future date and any CVC.
 
-## Deploy on Vercel
+## Project Structure
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```
+src/
+├── app/
+│   ├── page.tsx                 # Landing page
+│   ├── tailor/page.tsx          # Resume input form
+│   ├── result/page.tsx          # Shows tailored resume after payment
+│   └── api/
+│       ├── checkout/route.ts    # Creates Stripe checkout session
+│       ├── tailor/route.ts      # OpenAI resume generation
+│       ├── result/route.ts      # Verifies payment & returns result
+│       └── webhook/route.ts     # Stripe webhook handler
+└── lib/
+    └── store.ts                 # In-memory store (replace with DB in production)
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Deploy to Production
+
+1. Push to GitHub
+2. Connect to [Vercel](https://vercel.com)
+3. Add environment variables in Vercel dashboard
+4. Set `NEXT_PUBLIC_BASE_URL` to your production domain
+5. Add Stripe webhook endpoint in Stripe Dashboard pointing to `https://yourdomain.com/api/webhook`
+
+## Next Steps (after first paying customers)
+
+- [ ] Replace in-memory store with Supabase/Postgres
+- [ ] Add user accounts (NextAuth.js)
+- [ ] Add PDF resume upload (parse with pdf-parse)
+- [ ] Add subscription tier ($15/mo for unlimited)
+- [ ] Add analytics (Vercel Analytics or PostHog)
