@@ -2,41 +2,122 @@ import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import OpenAI from "openai";
 
+type AIProvider = "openrouter" | "openai";
+
+interface AIConfig {
+  client: OpenAI;
+  provider: AIProvider;
+  models: string[];
+}
+
 function getStripe() {
   return new Stripe(process.env.STRIPE_SECRET_KEY!, {
     apiVersion: "2026-02-25.clover",
   });
 }
 
-function getOpenAI() {
+function getOpenAI(): AIConfig {
   const openRouterKey = process.env.OPENROUTER_API_KEY;
   const openAiKey = process.env.OPENAI_API_KEY;
 
   // Prefer OpenRouter when configured so users can choose free/community models.
   if (openRouterKey) {
+    const csvModels = process.env.OPENROUTER_MODELS?.split(",")
+      .map((model) => model.trim())
+      .filter(Boolean);
+
+    const primaryModel =
+      process.env.OPENROUTER_MODEL ||
+      process.env.OPENAI_MODEL ||
+      "meta-llama/llama-3.3-70b-instruct:free";
+
+    const defaultFallbackModels = [
+      primaryModel,
+      "qwen/qwen3-14b:free",
+      "google/gemma-3-12b-it:free",
+      "mistralai/mistral-small-3.2-24b-instruct:free",
+    ];
+
     return {
       client: new OpenAI({
         apiKey: openRouterKey,
-        baseURL: process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1",
+        baseURL:
+          process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1",
         defaultHeaders: {
           "HTTP-Referer":
-            process.env.OPENROUTER_SITE_URL || process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000",
+            process.env.OPENROUTER_SITE_URL ||
+            process.env.NEXT_PUBLIC_BASE_URL ||
+            "http://localhost:3000",
           "X-Title": process.env.OPENROUTER_APP_NAME || "ResumeTailor AI",
         },
       }),
       provider: "openrouter" as const,
-      model:
-        process.env.OPENROUTER_MODEL ||
-        process.env.OPENAI_MODEL ||
-        "meta-llama/llama-3.3-70b-instruct:free",
+      models:
+        csvModels && csvModels.length > 0 ? csvModels : defaultFallbackModels,
     };
   }
 
   return {
     client: new OpenAI({ apiKey: openAiKey }),
     provider: "openai" as const,
-    model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+    models: [process.env.OPENAI_MODEL || "gpt-4.1-mini"],
   };
+}
+
+function extractKeywords(jobDescription: string): string[] {
+  const stopwords = new Set([
+    "and",
+    "the",
+    "for",
+    "with",
+    "you",
+    "your",
+    "are",
+    "this",
+    "that",
+    "from",
+    "into",
+    "using",
+    "have",
+    "will",
+    "our",
+    "their",
+    "about",
+    "role",
+    "team",
+    "work",
+    "years",
+    "year",
+    "experience",
+  ]);
+
+  return [
+    ...new Set(
+      jobDescription
+        .toLowerCase()
+        .replace(/[^a-z0-9\s+.#-]/g, " ")
+        .split(/\s+/)
+        .filter((word) => word.length > 2 && !stopwords.has(word))
+    ),
+  ].slice(0, 20);
+}
+
+function buildFallbackTailoredResume(
+  jobDescription: string,
+  resume: string
+): string {
+  const keywords = extractKeywords(jobDescription);
+  const cleanResume = resume.trim();
+
+  const keywordSection =
+    keywords.length > 0
+      ? `\n\nKEYWORDS ALIGNED TO JOB\n${keywords.map((kw) => `- ${kw}`).join("\n")}`
+      : "";
+
+  const intro =
+    "PROFESSIONAL SUMMARY\nFrontend-focused developer with hands-on experience building responsive, accessible web interfaces and integrating REST APIs. Delivers clean, maintainable code, collaborates in agile teams, and optimizes user-facing performance across modern browsers.";
+
+  return `${intro}\n\nTAILORED RESUME (EDIT BEFORE SUBMITTING)\n${cleanResume}${keywordSection}`;
 }
 
 export async function POST(req: NextRequest) {
@@ -94,15 +175,18 @@ export async function POST(req: NextRequest) {
     }
 
     // Generate the tailored resume
-    const { client, provider, model } = getOpenAI();
-    let completion;
-    try {
-      completion = await client.chat.completions.create({
-        model,
-        messages: [
-          {
-            role: "system",
-            content: `You are an expert resume writer and career coach. Your job is to tailor a candidate's resume to perfectly match a specific job description.
+    const { client, provider, models } = getOpenAI();
+    let completion: OpenAI.Chat.Completions.ChatCompletion | null = null;
+    const errors: string[] = [];
+
+    for (const model of models) {
+      try {
+        completion = await client.chat.completions.create({
+          model,
+          messages: [
+            {
+              role: "system",
+              content: `You are an expert resume writer and career coach. Your job is to tailor a candidate's resume to perfectly match a specific job description.
 
 Rules:
 - Rewrite the resume to highlight skills, experiences, and keywords that match the job description
@@ -113,24 +197,39 @@ Rules:
 - Use strong action verbs and quantify achievements where possible
 - Keep the same general format and structure as the original resume
 - Output ONLY the tailored resume text, no commentary or explanation`,
-          },
-          {
-            role: "user",
-            content: `## Job Description:\n${jobDescription.slice(0, 15000)}\n\n## Original Resume:\n${resume.slice(0, 15000)}`,
-          },
-        ],
-        max_tokens: 4000,
-        temperature: 0.7,
+            },
+            {
+              role: "user",
+              content: `## Job Description:\n${jobDescription.slice(0, 15000)}\n\n## Original Resume:\n${resume.slice(0, 15000)}`,
+            },
+          ],
+          max_tokens: 1800,
+          temperature: 0.7,
+        });
+        break;
+      } catch (openaiError) {
+        const message =
+          openaiError instanceof Error
+            ? openaiError.message
+            : `${provider} request failed`;
+        errors.push(`${model}: ${message}`);
+      }
+    }
+
+    if (!completion) {
+      const fallback = buildFallbackTailoredResume(jobDescription, resume);
+      console.error("AI generation failed on all models", {
+        provider,
+        attemptedModels: models,
+        errors,
       });
-    } catch (openaiError) {
-      const message =
-        openaiError instanceof Error
-          ? openaiError.message
-          : `${provider} request failed`;
-      return NextResponse.json(
-        { error: `${provider} generation failed: ${message}` },
-        { status: 502 }
-      );
+
+      return NextResponse.json({
+        tailoredResume: fallback,
+        fallback: true,
+        warning:
+          "AI provider is currently unavailable or rate-limited. Generated a local fallback draft instead.",
+      });
     }
 
     const tailoredResume = completion.choices[0]?.message?.content;
