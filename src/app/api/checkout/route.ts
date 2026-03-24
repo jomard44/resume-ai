@@ -10,6 +10,7 @@ function getStripe() {
 export async function POST(req: NextRequest) {
   try {
     const stripe = getStripe();
+    const origin = new URL(req.url).origin;
     const { jobDescription, resume } = await req.json();
 
     if (!jobDescription || !resume) {
@@ -36,8 +37,8 @@ export async function POST(req: NextRequest) {
         },
       ],
       mode: "payment",
-      success_url: `${process.env.NEXT_PUBLIC_BASE_URL}/result?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.NEXT_PUBLIC_BASE_URL}/tailor`,
+      success_url: `${origin}/result?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/tailor`,
       metadata: {
         type: "resume_tailor",
       },
