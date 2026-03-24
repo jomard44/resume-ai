@@ -6,7 +6,7 @@ AI-powered resume tailoring tool. Users paste a job description + their resume, 
 
 - **Next.js** (App Router) — full-stack framework
 - **Tailwind CSS** — styling
-- **OpenAI GPT-4o** — AI resume generation
+- **OpenRouter (or OpenAI fallback)** — AI resume generation
 - **Stripe** — payment processing
 - **TypeScript** — type safety
 
@@ -28,9 +28,17 @@ cp .env.example .env.local
 
 You need:
 
-- **OpenAI API key** — get one at https://platform.openai.com/api-keys
+- **OpenRouter API key (recommended)** — get one at https://openrouter.ai/keys
+- Optional fallback: **OpenAI API key** — get one at https://platform.openai.com/api-keys
 - **Stripe secret key** — get one at https://dashboard.stripe.com/apikeys
 - **Stripe webhook secret** — see step 4
+
+Recommended AI env values:
+
+```bash
+OPENROUTER_API_KEY=or-...
+OPENROUTER_MODEL=meta-llama/llama-3.3-70b-instruct:free
+```
 
 ### 3. Run the development server
 

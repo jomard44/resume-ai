@@ -9,7 +9,34 @@ function getStripe() {
 }
 
 function getOpenAI() {
-  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const openRouterKey = process.env.OPENROUTER_API_KEY;
+  const openAiKey = process.env.OPENAI_API_KEY;
+
+  // Prefer OpenRouter when configured so users can choose free/community models.
+  if (openRouterKey) {
+    return {
+      client: new OpenAI({
+        apiKey: openRouterKey,
+        baseURL: process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1",
+        defaultHeaders: {
+          "HTTP-Referer":
+            process.env.OPENROUTER_SITE_URL || process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000",
+          "X-Title": process.env.OPENROUTER_APP_NAME || "ResumeTailor AI",
+        },
+      }),
+      provider: "openrouter" as const,
+      model:
+        process.env.OPENROUTER_MODEL ||
+        process.env.OPENAI_MODEL ||
+        "meta-llama/llama-3.3-70b-instruct:free",
+    };
+  }
+
+  return {
+    client: new OpenAI({ apiKey: openAiKey }),
+    provider: "openai" as const,
+    model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+  };
 }
 
 export async function POST(req: NextRequest) {
@@ -24,11 +51,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!process.env.OPENAI_API_KEY) {
+    if (!process.env.OPENROUTER_API_KEY && !process.env.OPENAI_API_KEY) {
       return NextResponse.json(
         {
           error:
-            "Server misconfiguration: OPENAI_API_KEY is missing in environment variables.",
+            "Server misconfiguration: set OPENROUTER_API_KEY (recommended) or OPENAI_API_KEY.",
         },
         { status: 500 }
       );
@@ -67,11 +94,10 @@ export async function POST(req: NextRequest) {
     }
 
     // Generate the tailored resume
-    const openai = getOpenAI();
-    const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+    const { client, provider, model } = getOpenAI();
     let completion;
     try {
-      completion = await openai.chat.completions.create({
+      completion = await client.chat.completions.create({
         model,
         messages: [
           {
@@ -100,9 +126,9 @@ Rules:
       const message =
         openaiError instanceof Error
           ? openaiError.message
-          : "OpenAI request failed";
+          : `${provider} request failed`;
       return NextResponse.json(
-        { error: `OpenAI generation failed: ${message}` },
+        { error: `${provider} generation failed: ${message}` },
         { status: 502 }
       );
     }
