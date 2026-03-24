@@ -13,9 +13,28 @@ function getOpenAI() {
 }
 
 export async function POST(req: NextRequest) {
-  const stripe = getStripe();
-
   try {
+    if (!process.env.STRIPE_SECRET_KEY) {
+      return NextResponse.json(
+        {
+          error:
+            "Server misconfiguration: STRIPE_SECRET_KEY is missing in environment variables.",
+        },
+        { status: 500 }
+      );
+    }
+
+    if (!process.env.OPENAI_API_KEY) {
+      return NextResponse.json(
+        {
+          error:
+            "Server misconfiguration: OPENAI_API_KEY is missing in environment variables.",
+        },
+        { status: 500 }
+      );
+    }
+
+    const stripe = getStripe();
     const { sessionId, jobDescription, resume } = await req.json();
 
     if (!sessionId || !jobDescription || !resume) {
@@ -26,7 +45,19 @@ export async function POST(req: NextRequest) {
     }
 
     // Verify payment with Stripe
-    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    let session: Stripe.Checkout.Session;
+    try {
+      session = await stripe.checkout.sessions.retrieve(sessionId);
+    } catch (stripeError) {
+      const message =
+        stripeError instanceof Error
+          ? stripeError.message
+          : "Could not verify Stripe payment session";
+      return NextResponse.json(
+        { error: `Stripe verification failed: ${message}` },
+        { status: 400 }
+      );
+    }
 
     if (session.payment_status !== "paid") {
       return NextResponse.json(
@@ -37,12 +68,15 @@ export async function POST(req: NextRequest) {
 
     // Generate the tailored resume
     const openai = getOpenAI();
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        {
-          role: "system",
-          content: `You are an expert resume writer and career coach. Your job is to tailor a candidate's resume to perfectly match a specific job description.
+    const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+    let completion;
+    try {
+      completion = await openai.chat.completions.create({
+        model,
+        messages: [
+          {
+            role: "system",
+            content: `You are an expert resume writer and career coach. Your job is to tailor a candidate's resume to perfectly match a specific job description.
 
 Rules:
 - Rewrite the resume to highlight skills, experiences, and keywords that match the job description
@@ -53,15 +87,25 @@ Rules:
 - Use strong action verbs and quantify achievements where possible
 - Keep the same general format and structure as the original resume
 - Output ONLY the tailored resume text, no commentary or explanation`,
-        },
-        {
-          role: "user",
-          content: `## Job Description:\n${jobDescription.slice(0, 15000)}\n\n## Original Resume:\n${resume.slice(0, 15000)}`,
-        },
-      ],
-      max_tokens: 4000,
-      temperature: 0.7,
-    });
+          },
+          {
+            role: "user",
+            content: `## Job Description:\n${jobDescription.slice(0, 15000)}\n\n## Original Resume:\n${resume.slice(0, 15000)}`,
+          },
+        ],
+        max_tokens: 4000,
+        temperature: 0.7,
+      });
+    } catch (openaiError) {
+      const message =
+        openaiError instanceof Error
+          ? openaiError.message
+          : "OpenAI request failed";
+      return NextResponse.json(
+        { error: `OpenAI generation failed: ${message}` },
+        { status: 502 }
+      );
+    }
 
     const tailoredResume = completion.choices[0]?.message?.content;
 
@@ -75,8 +119,10 @@ Rules:
     return NextResponse.json({ tailoredResume });
   } catch (error) {
     console.error("Result API error:", error);
+    const message =
+      error instanceof Error ? error.message : "Unexpected server error";
     return NextResponse.json(
-      { error: "Failed to process request" },
+      { error: `Failed to process request: ${message}` },
       { status: 500 }
     );
   }
