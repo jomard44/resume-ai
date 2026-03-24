@@ -21,7 +21,21 @@ function ResultContent() {
 
     const fetchResult = async () => {
       try {
-        const res = await fetch(`/api/result?session_id=${sessionId}`);
+        // Retrieve data saved before Stripe redirect
+        const saved = localStorage.getItem("resumeTailorData");
+        if (!saved) {
+          throw new Error(
+            "Resume data not found. Please try again from the start."
+          );
+        }
+
+        const { jobDescription, resume } = JSON.parse(saved);
+
+        const res = await fetch("/api/result", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId, jobDescription, resume }),
+        });
         const data = await res.json();
 
         if (!res.ok) {
@@ -29,6 +43,8 @@ function ResultContent() {
         }
 
         setTailoredResume(data.tailoredResume);
+        // Clean up localStorage after successful generation
+        localStorage.removeItem("resumeTailorData");
       } catch (err) {
         setError(err instanceof Error ? err.message : "Something went wrong");
       } finally {

@@ -28,6 +28,11 @@ export default function TailorPage() {
       }
 
       const { url } = await checkoutRes.json();
+      // Save data to localStorage so it survives the Stripe redirect
+      localStorage.setItem(
+        "resumeTailorData",
+        JSON.stringify({ jobDescription, resume })
+      );
       // Redirect to Stripe Checkout
       router.push(url);
     } catch {
